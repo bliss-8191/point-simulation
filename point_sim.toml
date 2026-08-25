@@ -1,0 +1,32 @@
+fullscreen = true
+# needs to be set with clear_color to work
+transparent_window = false
+# color of background
+clear_color = [0.0, 0.0, 0.0, 0.0]
+# number of simulation updates per second
+update_rate = 10000.0
+# measured in frames
+# setting this to N means the simulation can update N frames worth of updates in one frame
+# this is used to keep simulation speed constant when the framerate is slow
+max_simulation_time_per_update = 20.0
+
+# how strong the input pushes and pulls points
+input_force = 0.0000003
+# how quickly point velocities decay
+decay_factor = 0.99987
+# the distance from the input points move toward
+target_radius = 0.25
+# decreases force factor if points are far. set to 0.0 to disable
+force_falloff = 0.5
+
+point_count = 1_000_000
+point_size = 0.001
+# colors of corners of points
+point_corner_colors = [
+    [1.0, 0.0, 0.0, 1.0],
+    [1.0, 1.0, 0.0, 1.0],
+    [0.0, 0.0, 1.0, 1.0],
+    [0.0, 1.0, 1.0, 1.0],
+]
+# makes the points circular instead of square
+points_circular = false

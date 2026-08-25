@@ -1,0 +1,13 @@
+[package]
+name = "point-sim"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bytemuck = "1.25.2"
+clap = { version = "4.6.6", features = ["derive"] }
+pollster = "1.0.1"
+renderdoc = "0.12.1"
+toml = "1.1.4"
+wgpu = "30.0.0"
+winit = "0.30.13"
