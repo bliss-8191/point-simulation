@@ -1,4 +1,5 @@
 const MAX_INPUT_POINTS: u32 = 32; // should be divisible by 2
+override INPUT_COUNT: u32;
 override INPUT_FORCE: f32;
 override DECAY_FACTOR: f32;
 override TARGET_RADIUS: f32;
@@ -7,8 +8,7 @@ override FORCE_FALLOFF: f32;
 
 struct Uniform {
     update_count: u32,
-    input_count: u32,
-    // implicit 8 byte padding
+    // implicit 12 byte padding
     input_positions: array<vec4<f32>, MAX_INPUT_POINTS/2>,
 };
 
@@ -39,12 +39,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     // get input points in vec2 array for convenience
     var input_positions: array<vec2<f32>, MAX_INPUT_POINTS>;
-    for (var i: u32 = 0; i < uniform_buffer.input_count; i += 2) {
+    for (var i: u32 = 0; i < INPUT_COUNT; i += 2) {
         // first half of vec4 (xy)
         input_positions[i] = uniform_buffer.input_positions[i>>1].xy;
 
         // input array is packed tightly into vec4 array
-        if i+1 < uniform_buffer.input_count {
+        if i+1 < INPUT_COUNT {
             // second half of vec4 (zw)
             input_positions[i+1] = uniform_buffer.input_positions[i>>1].zw;
         }
@@ -52,18 +52,18 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     // weight inputs based on distance (for multitouch)
     var input_weights: array<f32, MAX_INPUT_POINTS>;
-    for (var i: u32 = 0; i < uniform_buffer.input_count; i += 1) {
+    for (var i: u32 = 0; i < INPUT_COUNT; i += 1) {
         let dist = length(p - input_positions[i]);
         input_weights[i] = 1.0 / pow(dist, 5.0);
     }
     // normalize weights vector ("preserves" force")
     // this way inputs won't "add up"
     var sum: f32 = 0.0;
-    for (var i: u32 = 0; i < uniform_buffer.input_count; i++) {
+    for (var i: u32 = 0; i < INPUT_COUNT; i++) {
         sum += input_weights[i] * input_weights[i];
     }
     let sum_inv = 1.0 / sqrt(sum);
-    for (var i: u32 = 0; i < uniform_buffer.input_count; i++) {
+    for (var i: u32 = 0; i < INPUT_COUNT; i++) {
         input_weights[i] *= sum_inv;
     }
 
@@ -73,7 +73,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     for (var j: u32 = 0; j < uniform_buffer.update_count; j++) {
         var a = vec2<f32>(0.0);
         // accelerate for each input point
-        for (var i: u32 = 0; i < uniform_buffer.input_count; i++) {
+        for (var i: u32 = 0; i < INPUT_COUNT; i++) {
             let input_point = input_positions[i];
 
             // direction to the input position

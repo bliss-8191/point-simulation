@@ -88,7 +88,7 @@ impl<'a> PointSimBuilder<'a> {
 pub struct PointSim {
     update_rate: f64,
 
-    simulation_pipeline: ComputePipeline,
+    simulation_pipelines: Vec<ComputePipeline>,
     simulation_uniform_buffer: Buffer,
     geometry_pipeline: ComputePipeline,
 
@@ -104,8 +104,8 @@ impl From<&PointSimBuilder<'_>> for PointSim {
 
         let (
             simulation_bind_group_layout,
-            simulation_pipeline
-        ) = create_simulation_pipeline(&b.co, &b.constants.into_constants_for_pipeline());
+            simulation_pipelines
+        ) = create_simulation_pipelines(&b.co, &b.constants.into_constants_for_pipeline());
 
         let simulation_uniform_buffer = SimulationUniform::create_buffer(&b.co);
         simulation_uniform_buffer.as_entire_binding();
@@ -122,7 +122,7 @@ impl From<&PointSimBuilder<'_>> for PointSim {
         Self {
             update_rate: b.update_rate,
 
-            simulation_pipeline,
+            simulation_pipelines,
             simulation_uniform_buffer,
             geometry_pipeline,
 
@@ -140,18 +140,19 @@ impl PointSim {
     ) {
         let mut uniform_data = SimulationUniform {
             update_count: (self.update_rate * dt) as u32,
-            input_count: 0,
             _padding0: 0,
             _padding1: 0,
+            _padding2: 0,
             input_positions: [[0.0, 0.0]; MAX_INPUT_POINTS as usize],
         };
+        let mut input_count = 0usize;
         for (i, input_position) in input_positions.iter().enumerate() {
-            if uniform_data.input_count+1 < MAX_INPUT_POINTS.into() {
-                uniform_data.input_count += 1;
+            if input_count+1 < MAX_INPUT_POINTS.into() {
+                input_count += 1;
                 uniform_data.input_positions[i] = input_position.clone();
             }
         }
-        uniform_data.write_buffer(co, &self.simulation_uniform_buffer, 0);
+        uniform_data.write_buffer(co, &self.simulation_uniform_buffer, input_count, 0);
 
         let compute_pass_descriptor = ComputePassDescriptor {
             label: None, timestamp_writes: None,
@@ -159,7 +160,8 @@ impl PointSim {
 
         // this pass updates the front buffers and the vertex buffer according to the back buffers
         { let mut compute_pass = cmd.begin_compute_pass(&compute_pass_descriptor);
-            compute_pass.set_pipeline(&self.simulation_pipeline);
+            // use the pipeline that corresponds to this number of inputs
+            compute_pass.set_pipeline(&self.simulation_pipelines[input_count]);
             self.slices.record_simulation_update(&mut compute_pass);
             compute_pass.set_pipeline(&self.geometry_pipeline);
             self.slices.record_geometry_generation(&mut compute_pass);
@@ -450,9 +452,9 @@ impl PointSimSlice {
 #[derive(Copy, Clone, Zeroable, Pod)]
 struct SimulationUniform {
     update_count: u32,
-    input_count: u32,
     _padding0: u32,
     _padding1: u32,
+    _padding2: u32,
     // Memory layout here:
     // [
     //  vec2(p0.x, p0.y),
@@ -482,7 +484,7 @@ impl SimulationUniform {
     }
     /// uploads relevant part of the struct to a uniform buffer
     /// (ex. if there are only 3 input points, only need to upload those 3 and not the unused ones)
-    fn write_buffer(&self, co: &CommonWgpuObjects, buffer: &Buffer, offset: u64) {
+    fn write_buffer(&self, co: &CommonWgpuObjects, buffer: &Buffer, input_count: usize, offset: u64) {
         let all_bytes: &[u8; size_of::<Self>()] = cast_ref(self);
         let byte_count: usize =
             // start of `input_positions` array
@@ -490,13 +492,13 @@ impl SimulationUniform {
             // size of point
             + size_of::<PointPosition>()
             // times number of points
-            * self.input_count as usize;
+            * input_count;
         let bytes_to_upload = &all_bytes[0..byte_count];
         co.queue.write_buffer(buffer, offset, bytes_to_upload);
     }
 }
 
-fn create_simulation_pipeline(co: &CommonWgpuObjects, constants: &[(&str, f64)]) -> (BindGroupLayout, ComputePipeline) {
+fn create_simulation_pipelines(co: &CommonWgpuObjects, constants: &[(&str, f64)]) -> (BindGroupLayout, Vec<ComputePipeline>) {
     let bind_group_layout = co.device.create_bind_group_layout(&BindGroupLayoutDescriptor {
         label: None,
         entries: &[
@@ -564,19 +566,24 @@ fn create_simulation_pipeline(co: &CommonWgpuObjects, constants: &[(&str, f64)])
         source: ShaderSource::Wgsl(Cow::Borrowed(include_str!("compute_simulation.wgsl"))),
     });
 
-    let compute_pipeline = co.device.create_compute_pipeline(&ComputePipelineDescriptor {
-        label: None,
-        layout: Some(&pipeline_layout),
-        module: &compute_simulation_shader_module,
-        entry_point: Some("main"),
-        compilation_options: PipelineCompilationOptions {
-            constants,
-            zero_initialize_workgroup_memory: false,
-        },
-        cache: None,
-    });
+    // create a pipeline for each possible number of inputs
+    let compute_pipelines = (0..MAX_INPUT_POINTS).map(|i| {
+        let mut constants = Vec::from(constants);
+        constants.push(("INPUT_COUNT", i as f64));
+        co.device.create_compute_pipeline(&ComputePipelineDescriptor {
+            label: None,
+            layout: Some(&pipeline_layout),
+            module: &compute_simulation_shader_module,
+            entry_point: Some("main"),
+            compilation_options: PipelineCompilationOptions {
+                constants: &constants,
+                zero_initialize_workgroup_memory: false,
+            },
+            cache: None,
+        })
+    }).collect();
 
-    (bind_group_layout, compute_pipeline)
+    (bind_group_layout, compute_pipelines)
 }
 
 fn create_geometry_pipeline(co: &CommonWgpuObjects) -> (BindGroupLayout, ComputePipeline) {
